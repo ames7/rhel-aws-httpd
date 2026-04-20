@@ -180,7 +180,7 @@
         state: running
         network:
           assign_public_ip: "{{ ec2_assign_public_ip }}"
-        security_group_ids: >-
+        security_groups: >-
           {{
             (security_group_ids | default([]))
             + ([new_sg.group_id] if (ec2_create_security_group | bool) else [])
