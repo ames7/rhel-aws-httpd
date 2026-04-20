@@ -220,6 +220,12 @@
   gather_facts: false
   become: true
 
+  handlers:
+    - name: Restart httpd
+      ansible.builtin.service:
+        name: httpd
+        state: restarted
+
   tasks:
     - name: Wait until SSH is reachable
       ansible.builtin.wait_for_connection:
@@ -233,6 +239,7 @@
       ansible.builtin.dnf:
         name: httpd
         state: present
+      notify: Restart httpd
 
     - name: Deploy custom httpd.conf (contains intentional invalid directive)
       ansible.builtin.copy:
@@ -241,6 +248,7 @@
         owner: root
         group: root
         mode: "0644"
+      notify: Restart httpd
 
     - name: Enable and start httpd
       ansible.builtin.service:
