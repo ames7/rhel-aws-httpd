@@ -1,0 +1,163 @@
+---
+# RHEL 9.6 on AWS: launch EC2, install httpd, enable and start Apache.
+#
+# Prerequisites:
+#   - Ansible collections: amazon.aws (ansible-galaxy collection install -r requirements.yml)
+#   - AWS credentials (environment, profile, or instance role on the controller)
+#   - An EC2 key pair in the target region (ssh key for ansible_user)
+#
+# Run (example):
+#   ansible-playbook playbook.yml -e "key_name=my-key" -e "vpc_subnet_id=subnet-xxxxxxxx"
+#
+# Optional extra-vars:
+#   region, instance_type, key_name, vpc_subnet_id, assign_public_ip,
+#   security_group_ids (list), instance_name, allowed_ssh_cidr,
+#   create_security_group, ansible_user
+
+- name: Discover RHEL 9.6 AMI and launch EC2
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    region: "{{ region | default('us-east-1') }}"
+    instance_type: "{{ instance_type | default('t3.micro') }}"
+    instance_name: "{{ instance_name | default('rhel96-httpd-demo') }}"
+    # Red Hat's AWS account for RHEL images (Marketplace / on-demand RHEL)
+    rhel_owner: "309956199498"
+    # Wildcard for official RHEL 9.6.x image names (often RHEL-9.6.0_HVM-...-x86_64-...).
+    ami_name_pattern: "RHEL-9.6*"
+    assign_public_ip: "{{ assign_public_ip | default(true) }}"
+    create_security_group: "{{ create_security_group | default(true) }}"
+    ansible_user: "{{ ansible_user | default('ec2-user') }}"
+
+  tasks:
+    - name: Find RHEL 9.6 x86_64 AMIs
+      amazon.aws.ec2_ami_info:
+        region: "{{ region }}"
+        owners: "{{ rhel_owner }}"
+        filters:
+          name: "{{ ami_name_pattern }}"
+          architecture: x86_64
+          state: available
+      register: rhel_ami
+
+    - name: Fail if no matching AMI was found
+      ansible.builtin.assert:
+        that:
+          - rhel_ami.images | length > 0
+        fail_msg: >-
+          No AMI matched '{{ ami_name_pattern }}' for owner {{ rhel_owner }} in {{ region }}.
+          Confirm with: aws ec2 describe-images --owners {{ rhel_owner }} --filters Name=name,Values='RHEL-9.6*' --region {{ region }}
+          (GovCloud uses a different owner ID.)
+
+    - name: Choose newest AMI by creation date
+      ansible.builtin.set_fact:
+        rhel_ami_chosen: "{{ rhel_ami.images | sort(attribute='creation_date') | last }}"
+
+    - name: Set AMI id fact
+      ansible.builtin.set_fact:
+        rhel_ami_id: "{{ rhel_ami_chosen.image_id }}"
+
+    - name: Create security group for SSH and HTTP (optional)
+      when: create_security_group | bool
+      amazon.aws.ec2_security_group:
+        region: "{{ region }}"
+        name: "{{ instance_name }}-sg"
+        description: "SSH + HTTP for {{ instance_name }}"
+        rules:
+          - proto: tcp
+            ports: 22
+            cidr_ip: "{{ allowed_ssh_cidr | default('0.0.0.0/0') }}"
+            rule_desc: SSH
+          - proto: tcp
+            ports: 80
+            cidr_ip: 0.0.0.0/0
+            rule_desc: HTTP
+        rules_egress:
+          - proto: all
+            cidr_ip: 0.0.0.0/0
+      register: new_sg
+
+    - name: Require existing security groups when not creating one
+      when: not (create_security_group | bool)
+      ansible.builtin.assert:
+        that:
+          - security_group_ids is defined
+          - security_group_ids | length > 0
+        fail_msg: >-
+          When create_security_group=false, pass security_group_ids (list of SG ids) that allow SSH from this host.
+
+    - name: Launch RHEL 9.6 instance
+      amazon.aws.ec2_instance:
+        region: "{{ region }}"
+        name: "{{ instance_name }}"
+        key_name: "{{ key_name }}"
+        vpc_subnet_id: "{{ vpc_subnet_id }}"
+        instance_type: "{{ instance_type }}"
+        image_id: "{{ rhel_ami_id }}"
+        wait: true
+        state: running
+        network:
+          assign_public_ip: "{{ assign_public_ip }}"
+        security_group_ids: >-
+          {{
+            (security_group_ids | default([]))
+            + ([new_sg.group_id] if (create_security_group | bool) else [])
+          }}
+        tags:
+          Name: "{{ instance_name }}"
+          ManagedBy: ansible
+      register: ec2
+
+    - name: Pick instance public or private IP for Ansible
+      ansible.builtin.set_fact:
+        target_host_ip: >-
+          {{
+            (ec2.instances[0].public_ip_address | default(''))
+            or (ec2.instances[0].private_ip_address | default(''))
+          }}
+
+    - name: Fail if instance has no usable IP (check subnet / public IP settings)
+      ansible.builtin.assert:
+        that:
+          - target_host_ip | length > 0
+        fail_msg: >-
+          Instance launched but no IP was returned. If you need SSH from outside the VPC,
+          set assign_public_ip=true or use a bastion and private connectivity.
+
+    - name: Add new instance to ad hoc inventory group
+      ansible.builtin.add_host:
+        name: "{{ target_host_ip }}"
+        groups: rhel_launched
+        ansible_user: "{{ ansible_user }}"
+        ansible_ssh_private_key_file: "{{ ansible_ssh_private_key_file | default(omit) }}"
+        ansible_python_interpreter: /usr/bin/python3
+
+- name: Install httpd and start Apache on the new host
+  hosts: rhel_launched
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Wait until SSH is reachable
+      ansible.builtin.wait_for_connection:
+        timeout: 300
+        delay: 10
+
+    - name: Gather facts after SSH is up
+      ansible.builtin.setup:
+
+    - name: Install Apache (httpd)
+      ansible.builtin.dnf:
+        name: httpd
+        state: present
+
+    - name: Enable and start httpd
+      ansible.builtin.service:
+        name: httpd
+        state: started
+        enabled: true
+
+    - name: Show endpoint hint
+      ansible.builtin.debug:
+        msg: "Apache should respond on http://{{ inventory_hostname }}/ (ensure SG allows 80 from your client)."
