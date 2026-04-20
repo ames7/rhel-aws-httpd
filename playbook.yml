@@ -253,7 +253,6 @@
     - name: Enable and start httpd
       ansible.builtin.service:
         name: httpd
-        state: started
         enabled: true
 
     - name: Show endpoint hint
