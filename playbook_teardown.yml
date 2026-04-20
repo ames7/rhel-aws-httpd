@@ -1,0 +1,60 @@
+---
+# Undo playbook.yml: terminate the demo EC2 instance and remove the managed security group.
+#
+# Pass the same extra-vars you used for provision (at least instance_name and region if non-default).
+# If you provisioned with create_security_group=false, set the same here so we do not try to delete a non-existent SG name.
+#
+# Run (example):
+#   ansible-playbook playbook_teardown.yml -e "instance_name=rhel96-httpd-demo"
+#
+# Optional extra-vars: region, instance_name, create_security_group
+
+- name: Teardown RHEL httpd demo EC2 and managed security group
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    aws_region: "{{ region | default('us-east-2') }}"
+    ec2_instance_name: "{{ instance_name | default('rhel96-httpd-demo') }}"
+    ec2_create_security_group: "{{ create_security_group | default(true) }}"
+
+  tasks:
+    - name: Find EC2 instances created by the provision playbook
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ ec2_instance_name }}"
+          "tag:ManagedBy": "ansible"
+      register: demo_instances
+
+    - name: Build list of instance IDs not already terminated
+      ansible.builtin.set_fact:
+        instance_ids_to_remove: >-
+          {{
+            demo_instances.instances | default([])
+            | rejectattr('state.name', 'equalto', 'terminated')
+            | map(attribute='instance_id')
+            | list
+          }}
+
+    - name: Terminate matching instances
+      when: instance_ids_to_remove | length > 0
+      amazon.aws.ec2_instance:
+        region: "{{ aws_region }}"
+        instance_ids: "{{ instance_ids_to_remove }}"
+        state: absent
+        wait: true
+
+    - name: Report when no active instances matched
+      ansible.builtin.debug:
+        msg: >-
+          No non-terminated instances in {{ aws_region }} with tags
+          Name={{ ec2_instance_name }}, ManagedBy=ansible.
+      when: instance_ids_to_remove | length == 0
+
+    - name: Remove managed security group created by provision
+      when: ec2_create_security_group | bool
+      amazon.aws.ec2_security_group:
+        region: "{{ aws_region }}"
+        name: "{{ ec2_instance_name }}-sg"
+        state: absent
