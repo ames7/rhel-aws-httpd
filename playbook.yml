@@ -12,14 +12,14 @@
 # Optional extra-vars:
 #   region, instance_type, key_name, vpc_subnet_id, assign_public_ip,
 #   security_group_ids (list), instance_name, allowed_ssh_cidr,
-#   create_security_group, ansible_user
+#   create_security_group, ssh_user (SSH login on the new EC2 host; default ec2-user)
 
 - name: Discover RHEL 9.6 AMI and launch EC2
   hosts: localhost
   connection: local
   gather_facts: false
   vars:
-    region: "{{ region | default('us-east-1') }}"
+    region: "{{ region | default('us-east-2') }}"
     instance_type: "{{ instance_type | default('t3.micro') }}"
     instance_name: "{{ instance_name | default('rhel96-httpd-demo') }}"
     # Red Hat's AWS account for RHEL images (Marketplace / on-demand RHEL)
@@ -28,7 +28,8 @@
     ami_name_pattern: "RHEL-9.6*"
     assign_public_ip: "{{ assign_public_ip | default(true) }}"
     create_security_group: "{{ create_security_group | default(true) }}"
-    ansible_user: "{{ ansible_user | default('ec2-user') }}"
+    # Do not set play var ansible_user from ansible_user — it recurses when templated.
+    ssh_user: "{{ ssh_user | default('ec2-user') }}"
 
   tasks:
     - name: Find RHEL 9.6 x86_64 AMIs
@@ -129,7 +130,7 @@
       ansible.builtin.add_host:
         name: "{{ target_host_ip }}"
         groups: rhel_launched
-        ansible_user: "{{ ansible_user }}"
+        ansible_user: "{{ ssh_user }}"
         ansible_ssh_private_key_file: "{{ ansible_ssh_private_key_file | default(omit) }}"
         ansible_python_interpreter: /usr/bin/python3
 
