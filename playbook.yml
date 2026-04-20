@@ -4,7 +4,7 @@
 # Prerequisites:
 #   - Ansible collections: amazon.aws (ansible-galaxy collection install -r requirements.yml)
 #   - AWS credentials (environment, profile, or instance role on the controller)
-#   - An EC2 key pair in the target region (ssh key for ansible_user)
+#   - An EC2 key pair in the target region (matches ssh_user on the instance, default ec2-user)
 #
 # Run (example):
 #   ansible-playbook playbook.yml -e "key_name=my-key" -e "vpc_subnet_id=subnet-xxxxxxxx"
