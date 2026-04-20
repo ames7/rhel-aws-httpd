@@ -244,8 +244,15 @@
     - name: Enable and start httpd
       ansible.builtin.service:
         name: httpd
-        state: started
         enabled: true
+
+    - name: Deploy custom httpd.conf 
+      ansible.builtin.copy:
+        src: httpd.conf
+        dest: /etc/httpd/conf/httpd.conf
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Show endpoint hint
       ansible.builtin.debug:
