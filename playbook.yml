@@ -234,6 +234,14 @@
         name: httpd
         state: present
 
+    - name: Deploy custom httpd.conf (contains intentional invalid directive)
+      ansible.builtin.copy:
+        src: httpd.conf
+        dest: /etc/httpd/conf/httpd.conf
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Enable and start httpd
       ansible.builtin.service:
         name: httpd
