@@ -241,7 +241,7 @@
         state: present
       notify: Restart httpd
 
-    - name: Deploy custom httpd.conf (contains intentional invalid directive)
+    - name: Deploy custom httpd.conf (minimal valid main config)
       ansible.builtin.copy:
         src: httpd.conf
         dest: /etc/httpd/conf/httpd.conf
