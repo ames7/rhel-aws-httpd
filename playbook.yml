@@ -253,6 +253,7 @@
         owner: root
         group: root
         mode: "0644"
+      notify: Restart httpd
 
     - name: Show endpoint hint
       ansible.builtin.debug:
